@@ -5,8 +5,8 @@ A high-performance MCP (Model Context Protocol) server for ElevenLabs text-to-sp
 ## Features
 
 - ✅ Official ElevenLabs SDK integration
-- ✅ Streaming audio support
-- ✅ Automatic audio playback with ffplay
+- ✅ True streaming - no file saving!
+- ✅ Direct pipe to ffplay for instant playback
 - ✅ No token limit issues
 - ✅ Environment-based configuration
 - ✅ Voice listing support
@@ -27,8 +27,7 @@ Add to your `.mccp.json`:
         "ELEVENLABS_MODEL_ID": "eleven_flash_v2",
         "ELEVENLABS_STABILITY": "0.5",
         "ELEVENLABS_SIMILARITY_BOOST": "0.75",
-        "ELEVENLABS_STYLE": "0.1",
-        "ELEVENLABS_OUTPUT_DIR": "output"
+        "ELEVENLABS_STYLE": "0.1"
       }
     }
   }
@@ -43,7 +42,6 @@ Add to your `.mccp.json`:
 - `ELEVENLABS_STABILITY`: Voice stability 0-1 (default: 0.5)
 - `ELEVENLABS_SIMILARITY_BOOST`: Voice similarity 0-1 (default: 0.75)
 - `ELEVENLABS_STYLE`: Style exaggeration 0-1 (default: 0.1)
-- `ELEVENLABS_OUTPUT_DIR`: Where to save audio files (default: output)
 
 ## Available Tools
 

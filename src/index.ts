@@ -6,13 +6,8 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { ElevenLabsClient } from "elevenlabs";
-import * as fs from "fs";
-import * as path from "path";
-import { exec } from "child_process";
-import { promisify } from "util";
+import { spawn } from "child_process";
 import { Readable } from "stream";
-
-const execAsync = promisify(exec);
 
 // Configuration from environment variables
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
@@ -21,21 +16,17 @@ const DEFAULT_MODEL_ID = process.env.ELEVENLABS_MODEL_ID || "eleven_flash_v2";
 const DEFAULT_STABILITY = parseFloat(process.env.ELEVENLABS_STABILITY || "0.5");
 const DEFAULT_SIMILARITY_BOOST = parseFloat(process.env.ELEVENLABS_SIMILARITY_BOOST || "0.75");
 const DEFAULT_STYLE = parseFloat(process.env.ELEVENLABS_STYLE || "0.1");
-const OUTPUT_DIR = process.env.ELEVENLABS_OUTPUT_DIR || "output";
 
 interface TextToSpeechParams {
   text: string;
   voice_id?: string;
   model_id?: string;
-  output_format?: string;
-  stream?: boolean;
   play_audio?: boolean;
 }
 
 class ElevenLabsStreamingMCPServer {
   private server: Server;
   private client: ElevenLabsClient;
-  private jobCounter: number = 0;
 
   constructor() {
     if (!ELEVENLABS_API_KEY) {
@@ -50,7 +41,7 @@ class ElevenLabsStreamingMCPServer {
     this.server = new Server(
       {
         name: "elevenlabs-streaming-mcp",
-        version: "1.0.0",
+        version: "1.1.0",
       },
       {
         capabilities: {
@@ -60,14 +51,6 @@ class ElevenLabsStreamingMCPServer {
     );
 
     this.setupHandlers();
-    this.ensureOutputDirectory();
-  }
-
-  private ensureOutputDirectory() {
-    const outputPath = path.resolve(OUTPUT_DIR);
-    if (!fs.existsSync(outputPath)) {
-      fs.mkdirSync(outputPath, { recursive: true });
-    }
   }
 
   private setupHandlers() {
@@ -75,7 +58,7 @@ class ElevenLabsStreamingMCPServer {
       tools: [
         {
           name: "generate_audio",
-          description: "Generate audio from text using ElevenLabs with streaming support",
+          description: "Generate and stream audio from text using ElevenLabs",
           inputSchema: {
             type: "object",
             properties: {
@@ -93,7 +76,7 @@ class ElevenLabsStreamingMCPServer {
               },
               play_audio: {
                 type: "boolean",
-                description: "Whether to play the audio after generation (default: true)",
+                description: "Whether to play the audio (default: true)",
               },
             },
             required: ["text"],
@@ -134,7 +117,7 @@ class ElevenLabsStreamingMCPServer {
     } = params;
 
     try {
-      console.error(`Generating audio for text: "${text.substring(0, 50)}..."`);
+      console.error(`[ElevenLabs] Generating audio for: "${text.substring(0, 50)}..."`);
 
       // Create audio stream
       const audioStream = await this.client.textToSpeech.convert(voice_id, {
@@ -147,30 +130,46 @@ class ElevenLabsStreamingMCPServer {
         },
       });
 
-      // Generate filename
-      const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "_").split(".")[0];
-      const filename = `elevenlabs_${timestamp}_${this.jobCounter++}.mp3`;
-      const filepath = path.join(OUTPUT_DIR, filename);
-
-      // Convert ReadableStream to Node.js stream and save
-      const nodeStream = Readable.from(audioStream);
-      const writeStream = fs.createWriteStream(filepath);
-      
-      await new Promise<void>((resolve, reject) => {
-        nodeStream.pipe(writeStream);
-        writeStream.on("finish", () => resolve());
-        writeStream.on("error", reject);
-      });
-
-      console.error(`Audio saved to: ${filepath}`);
-
-      // Play audio if requested
+      // Stream directly to ffplay if requested
       if (play_audio) {
-        try {
-          await execAsync(`ffplay -nodisp -autoexit "${filepath}"`);
-          console.error("Audio playback completed");
-        } catch (playError) {
-          console.error("Failed to play audio:", playError);
+        const ffplay = spawn('ffplay', [
+          '-f', 'mp3',      // Input format
+          '-i', '-',        // Read from stdin
+          '-nodisp',        // No display window
+          '-autoexit',      // Exit when done
+          '-loglevel', 'quiet' // Suppress output
+        ]);
+
+        // Convert web stream to Node.js stream and pipe to ffplay
+        const nodeStream = Readable.from(audioStream);
+        nodeStream.pipe(ffplay.stdin);
+
+        // Handle ffplay process events
+        ffplay.on('error', (error) => {
+          console.error('[ElevenLabs] ffplay error:', error.message);
+        });
+
+        ffplay.on('close', (code) => {
+          if (code === 0) {
+            console.error('[ElevenLabs] Audio playback completed');
+          } else {
+            console.error(`[ElevenLabs] ffplay exited with code ${code}`);
+          }
+        });
+
+        // Wait for streaming to complete
+        await new Promise<void>((resolve, reject) => {
+          nodeStream.on('end', () => {
+            ffplay.stdin.end();
+            resolve();
+          });
+          nodeStream.on('error', reject);
+        });
+      } else {
+        // If not playing, just consume the stream
+        const nodeStream = Readable.from(audioStream);
+        for await (const _ of nodeStream) {
+          // Consume stream
         }
       }
 
@@ -178,12 +177,12 @@ class ElevenLabsStreamingMCPServer {
         content: [
           {
             type: "text",
-            text: `Audio generated successfully!\nFile: ${filename}\nPath: ${filepath}`,
+            text: `Audio generated and ${play_audio ? 'played' : 'streamed'} successfully!`,
           },
         ],
       };
     } catch (error) {
-      console.error("Error generating audio:", error);
+      console.error("[ElevenLabs] Error generating audio:", error);
       throw new Error(`Audio generation failed: ${error}`);
     }
   }
@@ -215,10 +214,9 @@ class ElevenLabsStreamingMCPServer {
   async run() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error("ElevenLabs Streaming MCP Server running...");
-    console.error(`Voice ID: ${DEFAULT_VOICE_ID}`);
-    console.error(`Model ID: ${DEFAULT_MODEL_ID}`);
-    console.error(`Output directory: ${OUTPUT_DIR}`);
+    console.error("[ElevenLabs] Streaming MCP Server v1.1.0 running...");
+    console.error(`[ElevenLabs] Voice ID: ${DEFAULT_VOICE_ID}`);
+    console.error(`[ElevenLabs] Model ID: ${DEFAULT_MODEL_ID}`);
   }
 }
 
