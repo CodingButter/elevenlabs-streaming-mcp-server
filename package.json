@@ -1,6 +1,6 @@
 {
   "name": "elevenlabs-streaming-mcp-server",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "ElevenLabs MCP server with streaming audio support",
   "main": "dist/index.js",
   "bin": {
@@ -20,15 +20,13 @@
   },
   "type": "commonjs",
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.17.0",
     "@types/node": "^24.1.0",
     "nodemon": "^3.1.10",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "elevenlabs": "^1.59.0",
-    "node-wav-player": "^1.0.0",
-    "play-sound": "^1.1.6"
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "elevenlabs": "^1.59.0"
   }
 }
